@@ -1,0 +1,27 @@
+# Ignore all node_modules folders in subdirectories
+node_modules/
+
+# Ignore all environment files
+.env
+*/.env
+*.env.local
+
+# Ignore build outputs (Next.js, etc.)
+.next/
+out/
+dist/
+build/
+
+# Ignore log files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Ignore system junk
+.DS_Store
+Thumbs.db
+
+# Ignore IDE settings
+.vscode/
+.idea/
