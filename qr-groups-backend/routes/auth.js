@@ -59,7 +59,7 @@ router.post('/login', async (req, res) => {
         error: 'Request body is empty. Did you send JSON with Content-Type: application/json?',
       });
     }
-    const { email, password } = req.body
+    const { email, password } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ error: 'Missing fields' })

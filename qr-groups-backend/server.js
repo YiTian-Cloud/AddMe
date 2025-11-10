@@ -5,6 +5,7 @@ const mongoose = require('mongoose')
 const cors = require('cors')
 const authRoutes = require('./routes/auth')
 const groupRoutes = require('./routes/groups');
+const postRoutes = require('./routes/posts')
 
 const app = express()
 
@@ -44,6 +45,8 @@ app.get('/', (req, res) => {
 // ✅ Use your real auth routes
 app.use('/auth', authRoutes)
 app.use('/groups', groupRoutes)
+app.use('/', postRoutes)
+
 
 const PORT = process.env.PORT || 4000
 

@@ -3,16 +3,36 @@ const mongoose = require('mongoose');
 
 const groupSchema = new mongoose.Schema(
   {
-    name: { type: String, required: true, unique: true, trim: true },
-    slug: { type: String, required: true, unique: true, trim: true },
-    description: { type: String, default: '' },
-    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    name: { type: String, required: true },
+    description: String,
+    owner: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+    },
+    slug: {
+      type: String,
+      unique: true, // uses existing slug_1 index
+    },
   },
   { timestamps: true }
 );
 
-// 👇 THIS creates the model
-const Group = mongoose.model('Group', groupSchema);
+// Helper to make a slug from name
+function makeSlug(name) {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-') // non-alphanum -> -
+    .replace(/(^-|-$)+/g, '');   // trim - at ends
+}
 
-// 👇 THIS is the important part: export the model itself, not an object wrapper
-module.exports = Group;
+// Auto-generate slug if missing
+groupSchema.pre('save', function (next) {
+  if (!this.slug && this.name) {
+    this.slug = makeSlug(this.name);
+  }
+  next();
+});
+
+module.exports = mongoose.model('Group', groupSchema);

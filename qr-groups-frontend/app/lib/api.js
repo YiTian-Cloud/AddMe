@@ -1,5 +1,5 @@
 // app/lib/api.js
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
+const API_BASE_URL = 'http://localhost:4000';
 
 export async function apiRequest(path, options = {}) {
   const url = `${API_BASE_URL}${path}`;
@@ -8,49 +8,64 @@ export async function apiRequest(path, options = {}) {
     'Content-Type': 'application/json',
   };
 
-  const headers = {
-    ...defaultHeaders,
-    ...(options.headers || {}),
-  };
-
   const res = await fetch(url, {
     ...options,
-    headers,
+    headers: {
+      ...defaultHeaders,
+      ...(options.headers || {}),
+    },
   });
 
-  let data = {};
-  try {
-    data = await res.json();
-  } catch (_) {
-    // ignore if no JSON body
-  }
+  const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    throw new Error(data.error || 'Request failed');
+    const message = data.error || `Request failed with status ${res.status}`;
+    throw new Error(message);
   }
 
   return data;
 }
 
-export async function getGroups() {
-  return apiRequest('/groups', { method: 'GET' });
+export function getMyGroups(token) {
+  return apiRequest('/groups/mine', {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  });
 }
 
-export async function createGroup(token, { name, description }) {
+export function getAllGroups(token) {
+  return apiRequest('/groups', {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function createGroup(token, { name, description }) {
   return apiRequest('/groups', {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify({ name, description }),
   });
 }
 
-export async function joinGroup(token, groupId) {
+export function joinGroup(token, groupId) {
   return apiRequest(`/groups/${groupId}/join`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function getPosts(token, groupId) {
+  return apiRequest(`/groups/${groupId}/posts`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function createPost(token, groupId, content) {
+  return apiRequest(`/groups/${groupId}/posts`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ content }),
   });
 }

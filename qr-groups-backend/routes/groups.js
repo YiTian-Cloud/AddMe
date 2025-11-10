@@ -1,96 +1,102 @@
 // routes/groups.js
 const express = require('express');
 const Group = require('../models/Group');
-const User = require('../models/User');
-const authMiddleware = require('../middleware/auth');
+const GroupMembership = require('../models/GroupMembership');
+const auth = require('../middleware/auth');
 
 const router = express.Router();
 
-// helper to slugify a group name
-function slugify(name) {
-  return name
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, '-')        // spaces -> dashes
-    .replace(/[^a-z0-9\-]/g, ''); // remove weird chars
-}
-
-// GET /groups  -> list all groups (public)
-router.get('/', async (req, res) => {
-  try {
-    console.log('--- GET /groups called ---');
-    console.log('Group model is:', typeof Group, Group && Group.modelName);
-
-    const groups = await Group.find().sort({ name: 1 }).lean();
-    console.log('Groups from DB:', groups);
-
-    res.json({ groups });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to fetch groups',
-                           details: err.message,
-         });
-  }
-});
-
-// POST /groups  -> create new group & add current user to it (auth)
-router.post('/', authMiddleware, async (req, res) => {
+// Create a group: POST /groups
+router.post('/', auth, async (req, res) => {
   try {
     const { name, description } = req.body;
 
     if (!name) {
-      return res.status(400).json({ error: 'Group name is required' });
-    }
-
-    const slug = slugify(name);
-
-    // avoid duplicates
-    const existing = await Group.findOne({ slug });
-    if (existing) {
-      return res.status(400).json({ error: 'A group with this name already exists' });
+      return res.status(400).json({ error: 'Name is required' });
     }
 
     const group = await Group.create({
       name,
-      slug,
-      description: description || '',
-      createdBy: req.user._id,
+      description,
+      owner: req.user._id,
     });
 
-    // add group to user's groups
-    await User.findByIdAndUpdate(
-      req.user._id,
-      { $addToSet: { groups: group._id } },
-      { new: true }
-    );
+    // Make creator an admin member
+    await GroupMembership.create({
+      user: req.user._id,
+      group: group._id,
+      role: 'admin',
+    });
 
-    res.status(201).json({ group });
+    res.json(group);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to create group' });
+    // handle duplicate slug (same name twice)
+    if (err.code === 11000 && err.keyPattern && err.keyPattern.slug) {
+      return res
+        .status(400)
+        .json({ error: 'A group with this name already exists.' });
+    }
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
-// POST /groups/:groupId/join  -> current user joins a group (auth)
-router.post('/:groupId/join', authMiddleware, async (req, res) => {
+// Get my groups: GET /groups/mine
+router.get('/mine', auth, async (req, res) => {
   try {
-    const { groupId } = req.params;
+    const memberships = await GroupMembership
+      .find({ user: req.user._id })
+      .populate('group');
 
-    const group = await Group.findById(groupId);
-    if (!group) {
-      return res.status(404).json({ error: 'Group not found' });
-    }
+    const groups = memberships
+      .map((m) => m.group)
+      .filter(Boolean); // in case of dangling refs
 
-    await User.findByIdAndUpdate(
-      req.user._id,
-      { $addToSet: { groups: group._id } },
-      { new: true }
-    );
-
-    res.json({ message: 'Joined group', group });
+    res.json(groups);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to join group' });
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get all groups: GET /groups
+router.get('/', auth, async (req, res) => {
+  try {
+    const groups = await Group.find().sort({ createdAt: -1 });
+    res.json(groups);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Join a group: POST /groups/:id/join
+router.post('/:id/join', auth, async (req, res) => {
+  try {
+    const groupId = req.params.id;
+
+    const existing = await GroupMembership.findOne({
+      user: req.user._id,
+      group: groupId,
+    });
+
+    if (existing) {
+      return res.json({ status: 'already_member' });
+    }
+
+    await GroupMembership.create({
+      user: req.user._id,
+      group: groupId,
+      role: 'member',
+    });
+
+    res.json({ status: 'joined' });
+  } catch (err) {
+    console.error(err);
+    if (err.code === 11000) {
+      return res.json({ status: 'already_member' });
+    }
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
