@@ -1,7 +1,6 @@
-// app/page.js
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import {
   getMyGroups,
@@ -11,7 +10,7 @@ import {
   getPosts,
   createPost,
 } from './lib/api';
-
+import { publicBaseUrl } from './lib/url';
 import { QRCodeCanvas } from 'qrcode.react';
 
 export default function DashboardPage() {
@@ -19,7 +18,10 @@ export default function DashboardPage() {
   const [token, setToken] = useState('');
   const [myGroups, setMyGroups] = useState([]);
   const [allGroups, setAllGroups] = useState([]);
-  const [selectedGroupId, setSelectedGroupId] = useState('');
+
+  const [selectedGroupId, setSelectedGroupId] = useState('');       // My Groups dropdown
+  const [selectedAllGroupId, setSelectedAllGroupId] = useState(''); // All Groups dropdown
+
   const [posts, setPosts] = useState([]);
   const [newPost, setNewPost] = useState('');
   const [newGroup, setNewGroup] = useState({ name: '', description: '' });
@@ -29,20 +31,17 @@ export default function DashboardPage() {
   // Load token + user from localStorage
   useEffect(() => {
     if (typeof window === 'undefined') return;
-
     const storedToken = localStorage.getItem('token');
     const storedUser = localStorage.getItem('user');
-
     if (storedToken && storedUser) {
       setToken(storedToken);
       setUser(JSON.parse(storedUser));
     }
   }, []);
 
-  // Load groups once we have a token
+  // Load groups when we have a token
   useEffect(() => {
     if (!token) return;
-
     const load = async () => {
       try {
         setError('');
@@ -50,15 +49,15 @@ export default function DashboardPage() {
           getMyGroups(token),
           getAllGroups(token),
         ]);
-        setMyGroups(mine);
-        setAllGroups(all);
+        setMyGroups(Array.isArray(mine) ? mine : []);
+        setAllGroups(Array.isArray(all) ? all : []);
+        if (all?.length && !selectedAllGroupId) setSelectedAllGroupId(all[0]._id);
       } catch (err) {
         setError(err.message);
       }
     };
-
     load();
-  }, [token]);
+  }, [token]); // eslint-disable-line
 
   const refreshGroups = async () => {
     if (!token) return;
@@ -67,24 +66,31 @@ export default function DashboardPage() {
         getMyGroups(token),
         getAllGroups(token),
       ]);
-      setMyGroups(mine);
-      setAllGroups(all);
+      setMyGroups(Array.isArray(mine) ? mine : []);
+      setAllGroups(Array.isArray(all) ? all : []);
     } catch (err) {
       setError(err.message);
     }
   };
 
-  const handleSelectGroup = async (groupId) => {
+  // Load posts when "My Groups" selection changes
+  useEffect(() => {
+    if (!token || !selectedGroupId) return;
+    const loadPosts = async () => {
+      try {
+        setError('');
+        const data = await getPosts(token, selectedGroupId);
+        setPosts(Array.isArray(data) ? data : (Array.isArray(data?.posts) ? data.posts : []));
+      } catch (err) {
+        setError(err.message);
+      }
+    };
+    loadPosts();
+  }, [token, selectedGroupId]);
+
+  const handleSelectGroup = (groupId) => {
     setSelectedGroupId(groupId);
     setPosts([]);
-    if (!groupId) return;
-    try {
-      setError('');
-      const data = await getPosts(token, groupId);
-      setPosts(data);
-    } catch (err) {
-      setError(err.message);
-    }
   };
 
   const handleSendPost = async (e) => {
@@ -95,7 +101,7 @@ export default function DashboardPage() {
       await createPost(token, selectedGroupId, newPost.trim());
       setNewPost('');
       const data = await getPosts(token, selectedGroupId);
-      setPosts(data);
+      setPosts(Array.isArray(data) ? data : (Array.isArray(data?.posts) ? data.posts : []));
     } catch (err) {
       setError(err.message);
     }
@@ -145,8 +151,26 @@ export default function DashboardPage() {
     setMyGroups([]);
     setAllGroups([]);
     setSelectedGroupId('');
+    setSelectedAllGroupId('');
     setPosts([]);
   };
+
+  // ====== QR (no more localhost) ======
+  const base = publicBaseUrl();
+  const qrJoinUrl = useMemo(() => {
+    if (!selectedAllGroupId) return '';
+    return `${base}/join?groupId=${selectedAllGroupId}`;
+  }, [base, selectedAllGroupId]);
+
+  const selectedAllGroup = useMemo(
+    () => allGroups.find(g => g._id === selectedAllGroupId),
+    [allGroups, selectedAllGroupId]
+  );
+
+  const isMemberOfSelectedAllGroup = useMemo(
+    () => !!myGroups.find(mg => mg._id === selectedAllGroupId),
+    [myGroups, selectedAllGroupId]
+  );
 
   return (
     <main style={{ maxWidth: 900, margin: '40px auto', fontFamily: 'sans-serif' }}>
@@ -228,48 +252,66 @@ export default function DashboardPage() {
             </form>
           </section>
 
-          {/* All groups with Join buttons */}
+          {/* All Groups — dropdown + QR preview (no giant list) */}
           <section style={{ marginBottom: 30 }}>
             <h3>All Groups</h3>
             {allGroups.length === 0 && <p>No groups exist yet.</p>}
-            <ul>
-  {allGroups.map((g) => (
-    <li key={g._id} style={{ marginBottom: 16 }}>
-      <strong>{g.name}</strong>
-      {' — '}
-      {g.description || 'No description'}
 
-      {/* Join button (if not already joined) */}
-      {!myGroups.some((mg) => mg._id === g._id) && (
-        <button
-          onClick={() => handleJoinGroupClick(g._id)}
-          style={{ marginLeft: 8 }}
-        >
-          Join
-        </button>
-      )}
+            {allGroups.length > 0 && (
+              <>
+                <label>
+                  Browse groups:{' '}
+                  <select
+                    value={selectedAllGroupId}
+                    onChange={(e) => setSelectedAllGroupId(e.target.value)}
+                  >
+                    {allGroups.map((g) => (
+                      <option key={g._id} value={g._id}>
+                        {g.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-      {/* Show QR button */}
-      <details style={{ marginTop: 6 }}>
-        <summary>📱 Show QR</summary>
-        <div style={{ marginTop: 8 }}>
-          <QRCodeCanvas
-            value={`http://localhost:3000/join?groupId=${g._id}`}
-            size={120}
-            includeMargin
-          />
-          <p style={{ fontSize: 12 }}>
-            Scan to join or sign up → {g.name}
-          </p>
-        </div>
-      </details>
-    </li>
-  ))}
-</ul>
+                {/* Actions for selected group */}
+                {selectedAllGroup && (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ fontSize: 14, color: '#555' }}>
+                      {selectedAllGroup.description || 'No description'}
+                    </div>
 
+                    {!isMemberOfSelectedAllGroup && (
+                      <button
+                        onClick={() => handleJoinGroupClick(selectedAllGroupId)}
+                        style={{ marginTop: 8 }}
+                      >
+                        Join this group
+                      </button>
+                    )}
+
+                    {/* QR (uses production base, not localhost) */}
+                    <details style={{ marginTop: 10 }}>
+                      <summary>📱 Show QR</summary>
+                      <div style={{ marginTop: 8 }}>
+                        {qrJoinUrl && (
+                          <>
+                            <QRCodeCanvas value={qrJoinUrl} size={140} includeMargin />
+                            <p style={{ fontSize: 12, marginTop: 6 }}>
+                              Scan to join → {selectedAllGroup.name}
+                              <br />
+                              <span style={{ color: '#666' }}>{qrJoinUrl}</span>
+                            </p>
+                          </>
+                        )}
+                      </div>
+                    </details>
+                  </div>
+                )}
+              </>
+            )}
           </section>
 
-          {/* Posts for selected group */}
+          {/* Posts for selected group (from "My Groups") */}
           {selectedGroupId && (
             <section>
               <h3>Posts in selected group</h3>
