@@ -3,8 +3,7 @@
 **AddMe** is a modern React + Next.js web app that lets people instantly join or create social or community groups by scanning a simple QR code.  
 You can share your personal or group invite QR, and new users can sign up in seconds — no app store download required!
 
-🌐 **Live Demo:** [Try it here → https://add-fek5ysqp3-yitian-clouds-projects.vercel.app/signup](https://add-fek5ysqp3-yitian-clouds-projects.vercel.app/signup)
-
+🌐 **Live Demo:** [Try it here → https://add-fek5ysqp3-yitian-clouds-projects.vercel.app/]
 ---
 
 ## ✨ Features
