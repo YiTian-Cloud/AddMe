@@ -9,8 +9,8 @@ import {
   joinGroup,
   getPosts,
   createPost,
-} from './lib/api';
-import { publicBaseUrl } from './lib/url';
+} from '../lib/api';
+import { publicBaseUrl } from '../lib/url';
 import { QRCodeCanvas } from 'qrcode.react';
 
 export default function DashboardPage() {
