@@ -5,6 +5,15 @@ const Group = require('../models/Group')
 
 const router = express.Router()
 
+const FRONTEND_BASE_URL = (process.env.FRONTEND_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+
+// Simple debug route: GET /qr/test
+router.get('/test', (req, res) => {
+    res.send('QR router is working');
+  });
+  
+
+
 // Simple debug route: GET /qr/test
 router.get('/test', (req, res) => {
   res.send('QR router is working')
@@ -20,7 +29,8 @@ router.get('/group/:id.png', async (req, res) => {
       return res.status(404).send('Group not found')
     }
 
-    const joinUrl = `http://localhost:4000/qr/join?groupId=${groupId}`
+   // const joinUrl = `http://localhost:4000/qr/join?groupId=${groupId}`
+   const joinUrl = `${FRONTEND_BASE_URL}/join?groupId=${groupId}`;
 
     res.setHeader('Content-Type', 'image/png')
 
