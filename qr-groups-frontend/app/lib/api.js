@@ -1,5 +1,7 @@
 // app/lib/api.js
-const API_BASE_URL = 'http://localhost:4000';
+//const API_BASE_URL = 'http://localhost:4000';
+const BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL; 
 
 export async function apiRequest(path, options = {}) {
   const url = `${API_BASE_URL}${path}`;
