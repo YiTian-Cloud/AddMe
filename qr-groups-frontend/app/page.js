@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
   getMyGroups,
@@ -13,22 +13,15 @@ import {
 import { publicBaseUrl } from './lib/url';
 import { QRCodeCanvas } from 'qrcode.react';
 
-export default function DashboardPage() {
+export default function LandingPage() {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState('');
   const [myGroups, setMyGroups] = useState([]);
-  const [allGroups, setAllGroups] = useState([]);
-
-  const [selectedGroupId, setSelectedGroupId] = useState('');       // My Groups dropdown
-  const [selectedAllGroupId, setSelectedAllGroupId] = useState(''); // All Groups dropdown
-
+  const [selectedGroupId, setSelectedGroupId] = useState('');
   const [posts, setPosts] = useState([]);
   const [newPost, setNewPost] = useState('');
-  const [newGroup, setNewGroup] = useState({ name: '', description: '' });
-  const [status, setStatus] = useState('');
   const [error, setError] = useState('');
 
-  // Load token + user from localStorage
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const storedToken = localStorage.getItem('token');
@@ -39,304 +32,190 @@ export default function DashboardPage() {
     }
   }, []);
 
-  // Load groups when we have a token
   useEffect(() => {
     if (!token) return;
-    const load = async () => {
+    (async () => {
       try {
-        setError('');
-        const [mine, all] = await Promise.all([
-          getMyGroups(token),
-          getAllGroups(token),
-        ]);
+        const mine = await getMyGroups(token);
         setMyGroups(Array.isArray(mine) ? mine : []);
-        setAllGroups(Array.isArray(all) ? all : []);
-        if (all?.length && !selectedAllGroupId) setSelectedAllGroupId(all[0]._id);
-      } catch (err) {
-        setError(err.message);
+      } catch (e) {
+        setError(e.message);
       }
-    };
-    load();
-  }, [token]); // eslint-disable-line
+    })();
+  }, [token]);
 
-  const refreshGroups = async () => {
-    if (!token) return;
+  const loadPosts = async (groupId) => {
     try {
-      const [mine, all] = await Promise.all([
-        getMyGroups(token),
-        getAllGroups(token),
-      ]);
-      setMyGroups(Array.isArray(mine) ? mine : []);
-      setAllGroups(Array.isArray(all) ? all : []);
-    } catch (err) {
-      setError(err.message);
+      const data = await getPosts(token, groupId);
+      setPosts(Array.isArray(data) ? data : data.posts || []);
+    } catch (e) {
+      setError(e.message);
     }
   };
 
-  // Load posts when "My Groups" selection changes
-  useEffect(() => {
-    if (!token || !selectedGroupId) return;
-    const loadPosts = async () => {
-      try {
-        setError('');
-        const data = await getPosts(token, selectedGroupId);
-        setPosts(Array.isArray(data) ? data : (Array.isArray(data?.posts) ? data.posts : []));
-      } catch (err) {
-        setError(err.message);
-      }
-    };
-    loadPosts();
-  }, [token, selectedGroupId]);
-
-  const handleSelectGroup = (groupId) => {
-    setSelectedGroupId(groupId);
-    setPosts([]);
+  const handleSelectGroup = (e) => {
+    const id = e.target.value;
+    setSelectedGroupId(id);
+    if (id) loadPosts(id);
   };
 
   const handleSendPost = async (e) => {
     e.preventDefault();
     if (!newPost.trim() || !selectedGroupId) return;
     try {
-      setError('');
       await createPost(token, selectedGroupId, newPost.trim());
       setNewPost('');
-      const data = await getPosts(token, selectedGroupId);
-      setPosts(Array.isArray(data) ? data : (Array.isArray(data?.posts) ? data.posts : []));
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const handleCreateGroup = async (e) => {
-    e.preventDefault();
-    if (!newGroup.name.trim()) return;
-    try {
-      setStatus('Creating group...');
-      setError('');
-      await createGroup(token, {
-        name: newGroup.name.trim(),
-        description: newGroup.description.trim(),
-      });
-      setNewGroup({ name: '', description: '' });
-      await refreshGroups();
-      setStatus('Group created!');
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setTimeout(() => setStatus(''), 1500);
-    }
-  };
-
-  const handleJoinGroupClick = async (groupId) => {
-    try {
-      setStatus('Joining group...');
-      setError('');
-      await joinGroup(token, groupId);
-      await refreshGroups();
-      setStatus('Joined group!');
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setTimeout(() => setStatus(''), 1500);
+      loadPosts(selectedGroupId);
+    } catch (e2) {
+      setError(e2.message);
     }
   };
 
   const handleLogout = () => {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-    }
+    localStorage.clear();
     setUser(null);
     setToken('');
     setMyGroups([]);
-    setAllGroups([]);
-    setSelectedGroupId('');
-    setSelectedAllGroupId('');
     setPosts([]);
   };
 
-  // ====== QR (no more localhost) ======
   const base = publicBaseUrl();
-  const qrJoinUrl = useMemo(() => {
-    if (!selectedAllGroupId) return '';
-    return `${base}/join?groupId=${selectedAllGroupId}`;
-  }, [base, selectedAllGroupId]);
-
-  const selectedAllGroup = useMemo(
-    () => allGroups.find(g => g._id === selectedAllGroupId),
-    [allGroups, selectedAllGroupId]
-  );
-
-  const isMemberOfSelectedAllGroup = useMemo(
-    () => !!myGroups.find(mg => mg._id === selectedAllGroupId),
-    [myGroups, selectedAllGroupId]
-  );
 
   return (
-    <main style={{ maxWidth: 900, margin: '40px auto', fontFamily: 'sans-serif' }}>
-      <h1>QR Groups Dashboard</h1>
-
-      {!user && (
-        <p>
-          You are not logged in. <Link href="/login">Log in</Link> or{' '}
-          <Link href="/signup">Sign up</Link>.
-        </p>
-      )}
-
-      {user && (
-        <>
-          <div style={{ marginBottom: 20 }}>
-            <p>
-              Welcome, <strong>{user.name}</strong> ({user.email}){' '}
-              <button onClick={handleLogout}>Log out</button>
-            </p>
-          </div>
-
-          {error && <p style={{ color: 'red' }}>Error: {error}</p>}
-          {status && <p style={{ color: 'green' }}>{status}</p>}
-
-          {/* My groups dropdown */}
-          <section style={{ marginBottom: 30 }}>
-            <h2>My Groups</h2>
-            {myGroups.length === 0 && <p>You are not in any groups yet.</p>}
-
-            {myGroups.length > 0 && (
-              <div>
-                <label>
-                  Choose a group:{' '}
-                  <select
-                    value={selectedGroupId}
-                    onChange={(e) => handleSelectGroup(e.target.value)}
-                  >
-                    <option value="">-- Select --</option>
-                    {myGroups.map((g) => (
-                      <option key={g._id} value={g._id}>
-                        {g.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            )}
-          </section>
-
-          {/* Create group */}
-          <section style={{ marginBottom: 30 }}>
-            <h3>Create a new group</h3>
-            <form onSubmit={handleCreateGroup}>
-              <div style={{ marginBottom: 8 }}>
-                <input
-                  placeholder="Group name"
-                  value={newGroup.name}
-                  onChange={(e) =>
-                    setNewGroup((prev) => ({ ...prev, name: e.target.value }))
-                  }
-                  style={{ width: '100%' }}
-                  required
-                />
-              </div>
-              <div style={{ marginBottom: 8 }}>
-                <input
-                  placeholder="Description (optional)"
-                  value={newGroup.description}
-                  onChange={(e) =>
-                    setNewGroup((prev) => ({
-                      ...prev,
-                      description: e.target.value,
-                    }))
-                  }
-                  style={{ width: '100%' }}
-                />
-              </div>
-              <button type="submit">Create Group</button>
-            </form>
-          </section>
-
-          {/* All Groups — dropdown + QR preview (no giant list) */}
-          <section style={{ marginBottom: 30 }}>
-            <h3>All Groups</h3>
-            {allGroups.length === 0 && <p>No groups exist yet.</p>}
-
-            {allGroups.length > 0 && (
-              <>
-                <label>
-                  Browse groups:{' '}
-                  <select
-                    value={selectedAllGroupId}
-                    onChange={(e) => setSelectedAllGroupId(e.target.value)}
-                  >
-                    {allGroups.map((g) => (
-                      <option key={g._id} value={g._id}>
-                        {g.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                {/* Actions for selected group */}
-                {selectedAllGroup && (
-                  <div style={{ marginTop: 12 }}>
-                    <div style={{ fontSize: 14, color: '#555' }}>
-                      {selectedAllGroup.description || 'No description'}
-                    </div>
-
-                    {!isMemberOfSelectedAllGroup && (
-                      <button
-                        onClick={() => handleJoinGroupClick(selectedAllGroupId)}
-                        style={{ marginTop: 8 }}
-                      >
-                        Join this group
-                      </button>
-                    )}
-
-                    {/* QR (uses production base, not localhost) */}
-                    <details style={{ marginTop: 10 }}>
-                      <summary>📱 Show QR</summary>
-                      <div style={{ marginTop: 8 }}>
-                        {qrJoinUrl && (
-                          <>
-                            <QRCodeCanvas value={qrJoinUrl} size={140} includeMargin />
-                            <p style={{ fontSize: 12, marginTop: 6 }}>
-                              Scan to join → {selectedAllGroup.name}
-                              <br />
-                              <span style={{ color: '#666' }}>{qrJoinUrl}</span>
-                            </p>
-                          </>
-                        )}
-                      </div>
-                    </details>
-                  </div>
-                )}
-              </>
-            )}
-          </section>
-
-          {/* Posts for selected group (from "My Groups") */}
-          {selectedGroupId && (
-            <section>
-              <h3>Posts in selected group</h3>
-              {posts.length === 0 && <p>No posts yet.</p>}
-              <ul>
-                {posts.map((p) => (
-                  <li key={p._id} style={{ marginBottom: 8 }}>
-                    <strong>{p.author?.name || 'Unknown'}:</strong> {p.content}
-                  </li>
-                ))}
-              </ul>
-
-              <form onSubmit={handleSendPost} style={{ marginTop: 12 }}>
-                <input
-                  placeholder="Write a message"
-                  value={newPost}
-                  onChange={(e) => setNewPost(e.target.value)}
-                  style={{ width: '100%', marginBottom: 8 }}
-                />
-                <button type="submit">Post</button>
-              </form>
-            </section>
+    <main className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 font-sans">
+      <div className="max-w-3xl mx-auto py-10 px-4">
+        <header className="flex justify-between items-center mb-10">
+          <h1 className="text-3xl font-bold text-slate-800">QR Groups</h1>
+          {user ? (
+            <button
+              onClick={handleLogout}
+              className="text-sm text-slate-600 hover:text-slate-900"
+            >
+              Log out
+            </button>
+          ) : (
+            <div className="space-x-3">
+              <Link
+                href="/login"
+                className="px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700"
+              >
+                Log in
+              </Link>
+              <Link
+                href="/signup"
+                className="px-4 py-2 border border-slate-800 text-slate-800 rounded-lg hover:bg-slate-100"
+              >
+                Sign up
+              </Link>
+            </div>
           )}
-        </>
-      )}
+        </header>
+
+        {!user && (
+          <section className="text-center mt-24">
+            <h2 className="text-4xl font-bold mb-6 text-slate-700">
+              Join or create groups instantly
+            </h2>
+            <p className="text-slate-500 mb-10">
+              Scan a QR or sign up to start connecting.
+            </p>
+            <div className="flex justify-center gap-6">
+              <Link
+                href="/login"
+                className="px-6 py-3 bg-blue-600 text-white rounded-xl text-lg hover:bg-blue-500"
+              >
+                Log in
+              </Link>
+              <Link
+                href="/signup"
+                className="px-6 py-3 bg-white border border-blue-600 text-blue-600 rounded-xl text-lg hover:bg-blue-50"
+              >
+                Sign up
+              </Link>
+            </div>
+          </section>
+        )}
+
+        {user && (
+          <>
+            <section className="mb-8">
+              <h2 className="text-xl font-semibold mb-3 text-slate-700">
+                Welcome, {user.name}
+              </h2>
+
+              <label className="block text-sm text-slate-600 mb-2">
+                Choose a group:
+              </label>
+              <select
+                className="w-full border border-slate-300 rounded-lg p-2 mb-4 focus:ring-2 focus:ring-blue-500"
+                value={selectedGroupId}
+                onChange={handleSelectGroup}
+              >
+                <option value="">-- Select a group --</option>
+                {myGroups.map((g) => (
+                  <option key={g._id} value={g._id}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
+            </section>
+
+            {/* POST BOX */}
+            {selectedGroupId && (
+              <section className="bg-white shadow-md rounded-2xl p-5 mb-8">
+                <form onSubmit={handleSendPost}>
+                  <textarea
+                    rows={3}
+                    placeholder="Share something with your group..."
+                    className="w-full border border-slate-300 rounded-lg p-3 resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-3"
+                    value={newPost}
+                    onChange={(e) => setNewPost(e.target.value)}
+                    onFocus={(e) => e.target.setAttribute('rows', 5)}
+                    onBlur={(e) => e.target.setAttribute('rows', 3)}
+                  />
+                  <button
+                    type="submit"
+                    className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-500"
+                  >
+                    Post
+                  </button>
+                </form>
+              </section>
+            )}
+
+            {/* POSTS */}
+            {selectedGroupId && (
+              <section>
+                <h3 className="text-lg font-semibold mb-3 text-slate-700">
+                  Recent Posts
+                </h3>
+                <div className="space-y-3">
+                  {posts.map((p) => (
+                    <details
+                      key={p._id}
+                      className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm"
+                    >
+                      <summary className="cursor-pointer font-medium text-slate-800">
+                        {p.author?.name || 'Anonymous'}
+                        <span className="text-sm text-slate-500 ml-2">
+                          {new Date(p.createdAt).toLocaleString()}
+                        </span>
+                      </summary>
+                      <p className="mt-2 text-slate-700">{p.content}</p>
+                    </details>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {error && (
+              <div className="mt-6 p-3 text-sm bg-red-100 text-red-700 rounded-lg">
+                {error}
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </main>
   );
 }
