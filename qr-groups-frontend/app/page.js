@@ -5,49 +5,45 @@ import Link from 'next/link';
 import {
   getMyGroups,
   getAllGroups,
-  createGroup,
-  joinGroup,
   getPosts,
   createPost,
+  joinGroup,
+  createGroup, // optional: still available via API
 } from './lib/api';
 import { publicBaseUrl } from './lib/url';
 import { QRCodeCanvas } from 'qrcode.react';
 
-export default function DashboardPage() {
+export default function LandingPage() {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState('');
 
   const [myGroups, setMyGroups] = useState([]);
   const [allGroups, setAllGroups] = useState([]);
 
-  // "My Groups" selector drives the Posts panel
+  // My Groups selection drives composer + previous posts
   const [selectedGroupId, setSelectedGroupId] = useState('');
-  // "All Groups" selector drives the QR preview panel
-  const [selectedAllGroupId, setSelectedAllGroupId] = useState('');
-
   const [posts, setPosts] = useState([]);
   const [newPost, setNewPost] = useState('');
-  const [newGroup, setNewGroup] = useState({ name: '', description: '' });
 
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
+  const [showSignupQR, setShowSignupQR] = useState(false);
 
-  // --- load auth from localStorage ---
+  const base = publicBaseUrl();
+  const signupUrl = `${base}/signup`;
+
+  // ---- Auth from localStorage ----
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const storedToken = localStorage.getItem('token');
-    const storedUser = localStorage.getItem('user');
-    if (storedToken && storedUser) {
-      setToken(storedToken);
-      try {
-        setUser(JSON.parse(storedUser));
-      } catch {
-        setUser(null);
-      }
+    const t = localStorage.getItem('token');
+    const u = localStorage.getItem('user');
+    if (t && u) {
+      setToken(t);
+      try { setUser(JSON.parse(u)); } catch { setUser(null); }
     }
   }, []);
 
-  // --- load groups when we have a token ---
+  // ---- Load groups when logged in ----
   useEffect(() => {
     if (!token) return;
     (async () => {
@@ -56,7 +52,8 @@ export default function DashboardPage() {
         const [mine, all] = await Promise.all([getMyGroups(token), getAllGroups(token)]);
         setMyGroups(Array.isArray(mine) ? mine : []);
         setAllGroups(Array.isArray(all) ? all : []);
-        if (all?.length && !selectedAllGroupId) setSelectedAllGroupId(all[0]._id);
+        // auto-select first of "My Groups" for posting
+        if (!selectedGroupId && mine?.length) setSelectedGroupId(mine[0]._id);
       } catch (e) {
         setError(e.message || 'Failed to load groups');
       }
@@ -64,21 +61,9 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  // --- refresh groups helper ---
-  const refreshGroups = async () => {
-    if (!token) return;
-    try {
-      const [mine, all] = await Promise.all([getMyGroups(token), getAllGroups(token)]);
-      setMyGroups(Array.isArray(mine) ? mine : []);
-      setAllGroups(Array.isArray(all) ? all : []);
-    } catch (e) {
-      setError(e.message || 'Failed to refresh groups');
-    }
-  };
-
-  // --- select "My Group" -> load posts ---
+  // ---- Load posts when "My Group" changes ----
   useEffect(() => {
-    if (!token || !selectedGroupId) return;
+    if (!token || !selectedGroupId) { setPosts([]); return; }
     (async () => {
       try {
         setError('');
@@ -91,8 +76,9 @@ export default function DashboardPage() {
     })();
   }, [token, selectedGroupId]);
 
-  const handleSelectGroup = (groupId) => {
-    setSelectedGroupId(groupId);
+  // ---- Actions ----
+  const handleSelectMyGroup = (id) => {
+    setSelectedGroupId(id);
     setPosts([]);
   };
 
@@ -100,48 +86,34 @@ export default function DashboardPage() {
     e.preventDefault();
     if (!newPost.trim() || !selectedGroupId) return;
     try {
+      setStatus('Posting…');
       setError('');
       await createPost(token, selectedGroupId, newPost.trim());
       setNewPost('');
       const data = await getPosts(token, selectedGroupId);
       const list = Array.isArray(data) ? data : (Array.isArray(data?.posts) ? data.posts : []);
       setPosts(list);
-    } catch (e) {
-      setError(e.message || 'Failed to create post');
-    }
-  };
-
-  const handleCreateGroup = async (e) => {
-    e.preventDefault();
-    if (!newGroup.name.trim()) return;
-    try {
-      setStatus('Creating group...');
-      setError('');
-      await createGroup(token, {
-        name: newGroup.name.trim(),
-        description: newGroup.description.trim(),
-      });
-      setNewGroup({ name: '', description: '' });
-      await refreshGroups();
-      setStatus('Group created!');
-    } catch (e) {
-      setError(e.message || 'Failed to create group');
+      setStatus('Posted!');
+    } catch (e2) {
+      setError(e2.message || 'Failed to create post');
     } finally {
-      setTimeout(() => setStatus(''), 1500);
+      setTimeout(() => setStatus(''), 1200);
     }
   };
 
-  const handleJoinGroupClick = async (groupId) => {
+  const handleJoinSelected = async (groupId) => {
     try {
-      setStatus('Joining group...');
+      setStatus('Joining group…');
       setError('');
       await joinGroup(token, groupId);
-      await refreshGroups();
-      setStatus('Joined group!');
+      // refresh my groups
+      const mine = await getMyGroups(token);
+      setMyGroups(Array.isArray(mine) ? mine : []);
+      setStatus('Joined!');
     } catch (e) {
       setError(e.message || 'Failed to join group');
     } finally {
-      setTimeout(() => setStatus(''), 1500);
+      setTimeout(() => setStatus(''), 1200);
     }
   };
 
@@ -155,29 +127,15 @@ export default function DashboardPage() {
     setMyGroups([]);
     setAllGroups([]);
     setSelectedGroupId('');
-    setSelectedAllGroupId('');
     setPosts([]);
+    setShowSignupQR(false);
   };
 
-  // --- QR helpers ---
-  const base = publicBaseUrl();
-  const apiBase = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/$/, '');
-  const selectedAllGroup = useMemo(
-    () => allGroups.find((g) => g._id === selectedAllGroupId),
-    [allGroups, selectedAllGroupId]
+  // ---- Derived ----
+  const nonMemberGroups = useMemo(
+    () => allGroups.filter(g => !myGroups.find(mg => mg._id === g._id)),
+    [allGroups, myGroups]
   );
-  const isMemberOfSelectedAllGroup = useMemo(
-    () => !!myGroups.find((mg) => mg._id === selectedAllGroupId),
-    [myGroups, selectedAllGroupId]
-  );
-  const qrJoinUrl = useMemo(() => {
-    if (!selectedAllGroupId) return '';
-    return `${base}/join?groupId=${selectedAllGroupId}`;
-  }, [base, selectedAllGroupId]);
-  const backendQrPng = useMemo(() => {
-    if (!selectedAllGroupId || !apiBase) return '';
-    return `${apiBase}/qr/group/${selectedAllGroupId}.png`;
-  }, [apiBase, selectedAllGroupId]);
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 font-sans">
@@ -186,12 +144,20 @@ export default function DashboardPage() {
         <header className="flex justify-between items-center mb-10">
           <h1 className="text-3xl font-bold text-slate-800">QR Groups</h1>
           {user ? (
-            <button
-              onClick={handleLogout}
-              className="text-sm text-slate-600 hover:text-slate-900"
-            >
-              Log out
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setShowSignupQR(v => !v)}
+                className="px-3 py-2 border border-slate-800 text-slate-800 rounded-lg hover:bg-slate-100"
+              >
+                {showSignupQR ? 'Hide' : 'Share'} Signup QR
+              </button>
+              <button
+                onClick={handleLogout}
+                className="text-sm text-slate-600 hover:text-slate-900"
+              >
+                Log out
+              </button>
+            </div>
           ) : (
             <div className="space-x-3">
               <Link
@@ -210,209 +176,164 @@ export default function DashboardPage() {
           )}
         </header>
 
-        {/* Hero for logged-out */}
+        {/* Logged out: Big Signup QR */}
         {!user && (
-          <section className="text-center mt-20">
+          <section className="text-center mt-14">
             <h2 className="text-4xl font-bold mb-4 text-slate-700">
-              Join or create groups instantly
+              Share this QR to sign up instantly
             </h2>
-            <p className="text-slate-500 mb-8">
-              Scan a QR or sign up to start connecting.
+            <p className="text-slate-500 mb-6">
+              New friends can scan to create an account in seconds.
             </p>
-            <div className="flex justify-center gap-4">
-              <Link
-                href="/login"
-                className="px-6 py-3 bg-blue-600 text-white rounded-xl text-lg hover:bg-blue-500"
-              >
+            <div className="bg-white inline-block p-6 rounded-2xl shadow">
+              <QRCodeCanvas value={signupUrl} size={220} includeMargin />
+              <div className="mt-2 text-xs text-slate-600 break-all">{signupUrl}</div>
+              <div className="mt-3">
+                <button
+                  className="text-sm border rounded px-3 py-1.5"
+                  onClick={() => navigator.clipboard.writeText(signupUrl)}
+                >
+                  Copy link
+                </button>
+              </div>
+            </div>
+            <div className="mt-10 flex justify-center gap-4">
+              <Link href="/login" className="px-6 py-3 bg-blue-600 text-white rounded-xl text-lg hover:bg-blue-500">
                 Log in
               </Link>
-              <Link
-                href="/signup"
-                className="px-6 py-3 bg-white border border-blue-600 text-blue-600 rounded-xl text-lg hover:bg-blue-50"
-              >
+              <Link href="/signup" className="px-6 py-3 bg-white border border-blue-600 text-blue-600 rounded-xl text-lg hover:bg-blue-50">
                 Sign up
               </Link>
             </div>
           </section>
         )}
 
-        {/* Logged-in area */}
+        {/* Logged in content */}
         {user && (
           <>
-            {/* My Groups selector */}
+            {/* Toggleable Signup QR (single, not per-group) */}
+            {showSignupQR && (
+              <section className="mb-8">
+                <div className="border rounded-2xl p-5 bg-white shadow flex flex-col items-center">
+                  <div className="text-sm text-slate-700 mb-2">
+                    Share this QR with new friends — it opens the signup page.
+                  </div>
+                  <QRCodeCanvas value={signupUrl} size={200} includeMargin />
+                  <div className="mt-2 text-xs text-slate-600 break-all">{signupUrl}</div>
+                  <div className="mt-3">
+                    <button
+                      className="text-sm border rounded px-3 py-1.5"
+                      onClick={() => navigator.clipboard.writeText(signupUrl)}
+                    >
+                      Copy link
+                    </button>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {/* Join Groups (no QR here) */}
             <section className="mb-8">
-              <h2 className="text-xl font-semibold mb-3 text-slate-700">
-                Welcome, {user.name}
-              </h2>
-
-              <label className="block text-sm text-slate-600 mb-2">
-                Choose one of your groups to view posts:
-              </label>
-              <select
-                className="w-full border border-slate-300 rounded-lg p-2 mb-4 focus:ring-2 focus:ring-blue-500"
-                value={selectedGroupId}
-                onChange={(e) => handleSelectGroup(e.target.value)}
-              >
-                <option value="">-- Select a group --</option>
-                {myGroups.map((g) => (
-                  <option key={g._id} value={g._id}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
-            </section>
-
-            {/* Create Group card */}
-            <section className="mb-8 bg-white shadow rounded-2xl p-5">
-              <h3 className="text-lg font-semibold mb-3">Create a new group</h3>
-              <form onSubmit={handleCreateGroup} className="space-y-3">
-                <input
-                  className="w-full border rounded-lg p-2"
-                  placeholder="Group name"
-                  value={newGroup.name}
-                  onChange={(e) => setNewGroup((prev) => ({ ...prev, name: e.target.value }))}
-                  required
-                />
-                <input
-                  className="w-full border rounded-lg p-2"
-                  placeholder="Description (optional)"
-                  value={newGroup.description}
-                  onChange={(e) =>
-                    setNewGroup((prev) => ({ ...prev, description: e.target.value }))
-                  }
-                />
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500"
-                >
-                  Create Group
-                </button>
-                {status && <p className="text-green-600">{status}</p>}
-                {error && <p className="text-red-600">{error}</p>}
-              </form>
-            </section>
-
-            {/* All Groups dropdown + QR preview */}
-            <section className="mb-8">
-              <h3 className="text-lg font-semibold mb-2">All Groups</h3>
-
-              {allGroups.length === 0 && <p>No groups exist yet.</p>}
-
+              <h2 className="text-xl font-semibold mb-3 text-slate-700">Browse & Join Groups</h2>
+              {allGroups.length === 0 && (
+                <p className="text-slate-600">No groups exist yet.</p>
+              )}
               {allGroups.length > 0 && (
-                <>
-                  <label className="block text-sm mb-2">Browse groups</label>
+                <div className="flex gap-3">
                   <select
-                    className="w-full border rounded-lg p-2"
-                    value={selectedAllGroupId}
-                    onChange={(e) => setSelectedAllGroupId(e.target.value)}
+                    className="flex-1 border rounded-lg p-2"
+                    value={nonMemberGroups[0]?._id || ''}
+                    onChange={() => {}}
                   >
-                    {allGroups.map((g) => (
+                    {allGroups.map(g => (
                       <option key={g._id} value={g._id}>
                         {g.name}
+                        {myGroups.find(mg => mg._id === g._id) ? ' (Joined)' : ''}
                       </option>
                     ))}
                   </select>
-
-                  {/* QR / actions for selected group */}
-                  {!!selectedAllGroupId && (
-                    <div className="mt-4 border rounded-2xl p-4 bg-white shadow">
-                      <div className="text-sm text-slate-600 mb-2">
-                        {selectedAllGroup?.description || 'No description'}
-                      </div>
-
-                      {!isMemberOfSelectedAllGroup && (
-                        <button
-                          onClick={() => handleJoinGroupClick(selectedAllGroupId)}
-                          className="mb-3 px-3 py-1.5 border rounded-lg"
-                        >
-                          Join this group
-                        </button>
-                      )}
-
-                      <details>
-                        <summary className="cursor-pointer mb-2">📱 Show QR</summary>
-                        <div className="mt-3 flex flex-col items-center gap-2">
-                          {/* Frontend QR (scan → Vercel domain) */}
-                          {qrJoinUrl && <QRCodeCanvas value={qrJoinUrl} size={160} includeMargin />}
-                          <div className="text-xs text-slate-600 break-all">{qrJoinUrl}</div>
-                          <div className="flex gap-2">
-                            <button
-                              className="text-sm border rounded px-2 py-1"
-                              onClick={() => navigator.clipboard.writeText(qrJoinUrl)}
-                            >
-                              Copy link
-                            </button>
-
-                            {/* Backend-generated QR PNG (download) */}
-                            {backendQrPng && (
-                              <a
-                                href={backendQrPng}
-                                download={`group-${selectedAllGroupId}.png`}
-                                className="text-sm border rounded px-2 py-1"
-                                title="Download QR PNG from backend"
-                              >
-                                Download PNG
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      </details>
-                    </div>
-                  )}
-                </>
+                  {/* Explicit join control: choose from the list above */}
+                  <button
+                    className="px-4 py-2 border rounded-lg"
+                    onClick={() => {
+                      const selectEl = document.querySelector('select');
+                      const val = selectEl?.value;
+                      if (val) handleJoinSelected(val);
+                    }}
+                  >
+                    Join Selected
+                  </button>
+                </div>
               )}
             </section>
 
-            {/* Post composer + list (for a selected "My Group") */}
+            {/* My Groups -> select one to write, and collapse previous posts */}
+            <section className="mb-8">
+              <h2 className="text-xl font-semibold mb-3 text-slate-700">My Groups</h2>
+              {myGroups.length === 0 && <p className="text-slate-600">You haven't joined any groups yet.</p>}
+              {myGroups.length > 0 && (
+                <select
+                  className="w-full border rounded-lg p-2"
+                  value={selectedGroupId}
+                  onChange={(e) => handleSelectMyGroup(e.target.value)}
+                >
+                  <option value="">-- Select a group --</option>
+                  {myGroups.map(g => (
+                    <option key={g._id} value={g._id}>{g.name}</option>
+                  ))}
+                </select>
+              )}
+            </section>
+
+            {/* Composer */}
             {selectedGroupId && (
-              <>
-                <section className="bg-white shadow-md rounded-2xl p-5 mb-8">
-                  <form onSubmit={handleSendPost}>
-                    <textarea
-                      rows={3}
-                      placeholder="Share something with your group..."
-                      className="w-full border border-slate-300 rounded-lg p-3 resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-3"
-                      value={newPost}
-                      onChange={(e) => setNewPost(e.target.value)}
-                      onFocus={(e) => e.target.setAttribute('rows', 5)}
-                      onBlur={(e) => e.target.setAttribute('rows', 3)}
-                    />
+              <section className="bg-white shadow-md rounded-2xl p-5 mb-6">
+                <form onSubmit={handleSendPost}>
+                  <textarea
+                    rows={4}
+                    placeholder="Share something with your group…"
+                    className="w-full border border-slate-300 rounded-lg p-3 resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-3"
+                    value={newPost}
+                    onChange={(e) => setNewPost(e.target.value)}
+                    onFocus={(e) => e.target.setAttribute('rows', 6)}
+                    onBlur={(e) => e.target.setAttribute('rows', 4)}
+                  />
+                  <div className="flex items-center gap-3">
                     <button
                       type="submit"
                       className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-500"
                     >
                       Post
                     </button>
-                  </form>
-                </section>
+                    {status && <span className="text-sm text-green-600">{status}</span>}
+                    {error && <span className="text-sm text-red-600">{error}</span>}
+                  </div>
+                </form>
+              </section>
+            )}
 
-                <section>
-                  <h3 className="text-lg font-semibold mb-3 text-slate-700">Recent Posts</h3>
-                  <div className="space-y-3">
-                    {posts.map((p) => (
-                      <details key={p._id} className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
-                        <summary className="cursor-pointer font-medium text-slate-800">
-                          {p.author?.name || 'Anonymous'}
-                          {p.createdAt && (
-                            <span className="text-sm text-slate-500 ml-2">
-                              {new Date(p.createdAt).toLocaleString()}
-                            </span>
-                          )}
-                        </summary>
-                        {p.content && <p className="mt-2 text-slate-700">{p.content}</p>}
-                      </details>
-                    ))}
+            {/* Collapsed "View previous posts" */}
+            {selectedGroupId && (
+              <section className="mb-8">
+                <details className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
+                  <summary className="cursor-pointer font-medium text-slate-800">
+                    View previous posts ({posts.length})
+                  </summary>
+                  <div className="mt-3 space-y-3">
                     {posts.length === 0 && (
                       <div className="text-sm text-slate-500">No posts yet.</div>
                     )}
+                    {posts.map((p) => (
+                      <div key={p._id} className="border rounded-lg p-3">
+                        <div className="text-sm text-slate-500">
+                          {p.author?.name || 'Anonymous'} • {p.createdAt ? new Date(p.createdAt).toLocaleString() : ''}
+                        </div>
+                        {p.content && <div className="mt-1 text-slate-800">{p.content}</div>}
+                      </div>
+                    ))}
                   </div>
-                </section>
-              </>
-            )}
-
-            {/* global errors */}
-            {error && !status && (
-              <div className="mt-6 p-3 text-sm bg-red-100 text-red-700 rounded-lg">{error}</div>
+                </details>
+              </section>
             )}
           </>
         )}
