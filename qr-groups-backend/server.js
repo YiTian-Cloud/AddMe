@@ -17,20 +17,31 @@ const allowedOrigins = [
   'http://localhost:3000',
 ];
 
-app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps, curl, Postman)
-    if (!origin || allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    console.warn('❌ Blocked by CORS:', origin);
-    return callback(new Error('Not allowed by CORS'));
-  },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true, // set true only if you use cookies
-}));
+const allowedProd = new Set([
+  'https://add-me-azure.vercel.app', // production
+]);
 
+function isAllowedOrigin(origin) {
+  if (!origin) return true; // Postman/cURL/mobile apps
+  try {
+    const { origin: parsedOrigin, hostname, protocol } = new URL(origin);
+    if (allowedProd.has(parsedOrigin)) return true;
+    // Allow any Vercel preview for this project
+    if (protocol === 'https:' && hostname.endsWith('.vercel.app')) return true;
+  } catch (e) {
+    return false;
+  }
+  return false;
+}
+
+app.use(cors({
+  origin(origin, cb) {
+    return isAllowedOrigin(origin) ? cb(null, true) : cb(new Error('Not allowed by CORS'));
+  },
+  methods: ['GET','POST','PUT','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: false, // you’re not using cookies
+}));
 // Handle preflight requests explicitly
 app.options(/.*/, cors());
 
