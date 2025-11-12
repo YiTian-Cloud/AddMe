@@ -8,7 +8,7 @@ import {
   getPosts,
   createPost,
   joinGroup,
-  createGroup, // optional: still available via API
+  createGroup,
 } from './lib/api';
 import { publicBaseUrl } from './lib/url';
 import { QRCodeCanvas } from 'qrcode.react';
@@ -20,8 +20,12 @@ export default function LandingPage() {
   const [myGroups, setMyGroups] = useState([]);
   const [allGroups, setAllGroups] = useState([]);
 
-  // My Groups selection drives composer + previous posts
+  // Composer + previous posts are driven by "my groups" selection
   const [selectedGroupId, setSelectedGroupId] = useState('');
+
+  // Join flow is driven by a separate "browse all" selection
+  const [selectedJoinGroupId, setSelectedJoinGroupId] = useState('');
+
   const [posts, setPosts] = useState([]);
   const [newPost, setNewPost] = useState('');
 
@@ -29,10 +33,11 @@ export default function LandingPage() {
   const [error, setError] = useState('');
   const [showSignupQR, setShowSignupQR] = useState(false);
 
+  // ---------- URLs ----------
   const base = publicBaseUrl();
   const signupUrl = `${base}/signup`;
 
-  // ---- Auth from localStorage ----
+  // ---------- Auth from localStorage ----------
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const t = localStorage.getItem('token');
@@ -43,17 +48,22 @@ export default function LandingPage() {
     }
   }, []);
 
-  // ---- Load groups when logged in ----
+  // ---------- Load groups after sign-in ----------
   useEffect(() => {
     if (!token) return;
     (async () => {
       try {
         setError('');
         const [mine, all] = await Promise.all([getMyGroups(token), getAllGroups(token)]);
-        setMyGroups(Array.isArray(mine) ? mine : []);
-        setAllGroups(Array.isArray(all) ? all : []);
-        // auto-select first of "My Groups" for posting
-        if (!selectedGroupId && mine?.length) setSelectedGroupId(mine[0]._id);
+        const mineArr = Array.isArray(mine) ? mine : [];
+        const allArr = Array.isArray(all) ? all : [];
+        setMyGroups(mineArr);
+        setAllGroups(allArr);
+
+        // Auto-select a my-group for composer if none selected
+        if (!selectedGroupId && mineArr.length) setSelectedGroupId(mineArr[0]._id);
+        // Default join dropdown to the first all-group
+        if (!selectedJoinGroupId && allArr.length) setSelectedJoinGroupId(allArr[0]._id);
       } catch (e) {
         setError(e.message || 'Failed to load groups');
       }
@@ -61,7 +71,7 @@ export default function LandingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  // ---- Load posts when "My Group" changes ----
+  // ---------- Load posts when my-group selection changes ----------
   useEffect(() => {
     if (!token || !selectedGroupId) { setPosts([]); return; }
     (async () => {
@@ -76,7 +86,17 @@ export default function LandingPage() {
     })();
   }, [token, selectedGroupId]);
 
-  // ---- Actions ----
+  // ---------- Helpers ----------
+  const refreshMyAndAll = async () => {
+    const [mine, all] = await Promise.all([getMyGroups(token), getAllGroups(token)]);
+    const mineArr = Array.isArray(mine) ? mine : [];
+    const allArr = Array.isArray(all) ? all : [];
+    setMyGroups(mineArr);
+    setAllGroups(allArr);
+    return { mineArr, allArr };
+  };
+
+  // ---------- Handlers ----------
   const handleSelectMyGroup = (id) => {
     setSelectedGroupId(id);
     setPosts([]);
@@ -101,14 +121,51 @@ export default function LandingPage() {
     }
   };
 
-  const handleJoinSelected = async (groupId) => {
+  const handleCreateGroup = async (e) => {
+    e.preventDefault();
+    const name = e.target.elements.groupName?.value?.trim();
+    const description = e.target.elements.groupDesc?.value?.trim() || '';
+    if (!name) return;
+
+    try {
+      setStatus('Creating group…');
+      setError('');
+      await createGroup(token, { name, description });
+
+      // Refresh lists and auto-select the newly created group if we can detect it
+      const { mineArr, allArr } = await refreshMyAndAll();
+      // Best effort: pick the last in myGroups as newly created (or keep previous)
+      const newestMine = mineArr[mineArr.length - 1];
+      if (newestMine?._id) {
+        setSelectedGroupId(newestMine._id);
+        // Also set join dropdown to that group for convenience
+        setSelectedJoinGroupId(newestMine._id);
+      } else if (allArr.length && !selectedJoinGroupId) {
+        setSelectedJoinGroupId(allArr[0]._id);
+      }
+
+      e.target.reset();
+      setStatus('Group created!');
+    } catch (e2) {
+      setError(e2.message || 'Failed to create group');
+    } finally {
+      setTimeout(() => setStatus(''), 1500);
+    }
+  };
+
+  const handleJoinSelected = async () => {
+    if (!selectedJoinGroupId) return;
     try {
       setStatus('Joining group…');
       setError('');
-      await joinGroup(token, groupId);
-      // refresh my groups
-      const mine = await getMyGroups(token);
-      setMyGroups(Array.isArray(mine) ? mine : []);
+      await joinGroup(token, selectedJoinGroupId);
+
+      // Refresh and make the newly joined group the active one for posting
+      const { mineArr } = await refreshMyAndAll();
+      const justJoined = mineArr.find(g => g._id === selectedJoinGroupId);
+      if (justJoined) {
+        setSelectedGroupId(justJoined._id);
+      }
       setStatus('Joined!');
     } catch (e) {
       setError(e.message || 'Failed to join group');
@@ -127,15 +184,17 @@ export default function LandingPage() {
     setMyGroups([]);
     setAllGroups([]);
     setSelectedGroupId('');
+    setSelectedJoinGroupId('');
     setPosts([]);
     setShowSignupQR(false);
   };
 
-  // ---- Derived ----
-  const nonMemberGroups = useMemo(
-    () => allGroups.filter(g => !myGroups.find(mg => mg._id === g._id)),
-    [allGroups, myGroups]
-  );
+  // ---------- Derived ----------
+  const myGroupsOptions = myGroups.map(g => ({ value: g._id, label: g.name }));
+  const allGroupsOptions = allGroups.map(g => ({
+    value: g._id,
+    label: `${g.name}${myGroups.find(mg => mg._id === g._id) ? ' (Joined)' : ''}`,
+  }));
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 font-sans">
@@ -176,11 +235,11 @@ export default function LandingPage() {
           )}
         </header>
 
-        {/* Logged out: Big Signup QR */}
+        {/* Logged out: single big signup QR */}
         {!user && (
           <section className="text-center mt-14">
             <h2 className="text-4xl font-bold mb-4 text-slate-700">
-              Share this QR to sign up instantly
+              Share this QR so friends can sign up instantly
             </h2>
             <p className="text-slate-500 mb-6">
               New friends can scan to create an account in seconds.
@@ -211,7 +270,7 @@ export default function LandingPage() {
         {/* Logged in content */}
         {user && (
           <>
-            {/* Toggleable Signup QR (single, not per-group) */}
+            {/* Toggleable Signup QR */}
             {showSignupQR && (
               <section className="mb-8">
                 <div className="border rounded-2xl p-5 bg-white shadow flex flex-col items-center">
@@ -232,7 +291,33 @@ export default function LandingPage() {
               </section>
             )}
 
-            {/* Join Groups (no QR here) */}
+            {/* Create Group */}
+            <section className="mb-8 bg-white shadow rounded-2xl p-5">
+              <h3 className="text-lg font-semibold mb-3">Create a new group</h3>
+              <form onSubmit={handleCreateGroup} className="space-y-3">
+                <input
+                  name="groupName"
+                  className="w-full border rounded-lg p-2"
+                  placeholder="Group name"
+                  required
+                />
+                <input
+                  name="groupDesc"
+                  className="w-full border rounded-lg p-2"
+                  placeholder="Description (optional)"
+                />
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500"
+                >
+                  Create Group
+                </button>
+                {status && <p className="text-green-600">{status}</p>}
+                {error && <p className="text-red-600">{error}</p>}
+              </form>
+            </section>
+
+            {/* Browse & Join Groups */}
             <section className="mb-8">
               <h2 className="text-xl font-semibold mb-3 text-slate-700">Browse & Join Groups</h2>
               {allGroups.length === 0 && (
@@ -242,32 +327,26 @@ export default function LandingPage() {
                 <div className="flex gap-3">
                   <select
                     className="flex-1 border rounded-lg p-2"
-                    value={nonMemberGroups[0]?._id || ''}
-                    onChange={() => {}}
+                    value={selectedJoinGroupId}
+                    onChange={(e) => setSelectedJoinGroupId(e.target.value)}
                   >
-                    {allGroups.map(g => (
-                      <option key={g._id} value={g._id}>
-                        {g.name}
-                        {myGroups.find(mg => mg._id === g._id) ? ' (Joined)' : ''}
-                      </option>
+                    {allGroupsOptions.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
                   </select>
-                  {/* Explicit join control: choose from the list above */}
                   <button
-                    className="px-4 py-2 border rounded-lg"
-                    onClick={() => {
-                      const selectEl = document.querySelector('select');
-                      const val = selectEl?.value;
-                      if (val) handleJoinSelected(val);
-                    }}
+                    className="px-4 py-2 border rounded-lg disabled:opacity-50"
+                    onClick={handleJoinSelected}
+                    disabled={!selectedJoinGroupId || !!myGroups.find(mg => mg._id === selectedJoinGroupId)}
+                    title={myGroups.find(mg => mg._id === selectedJoinGroupId) ? 'Already joined' : 'Join this group'}
                   >
-                    Join Selected
+                    {myGroups.find(mg => mg._id === selectedJoinGroupId) ? 'Joined' : 'Join'}
                   </button>
                 </div>
               )}
             </section>
 
-            {/* My Groups -> select one to write, and collapse previous posts */}
+            {/* My Groups -> Select one to write, previous posts collapsed */}
             <section className="mb-8">
               <h2 className="text-xl font-semibold mb-3 text-slate-700">My Groups</h2>
               {myGroups.length === 0 && <p className="text-slate-600">You haven't joined any groups yet.</p>}
@@ -278,8 +357,8 @@ export default function LandingPage() {
                   onChange={(e) => handleSelectMyGroup(e.target.value)}
                 >
                   <option value="">-- Select a group --</option>
-                  {myGroups.map(g => (
-                    <option key={g._id} value={g._id}>{g.name}</option>
+                  {myGroupsOptions.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
                 </select>
               )}
@@ -312,7 +391,7 @@ export default function LandingPage() {
               </section>
             )}
 
-            {/* Collapsed "View previous posts" */}
+            {/* Collapsed previous posts */}
             {selectedGroupId && (
               <section className="mb-8">
                 <details className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
