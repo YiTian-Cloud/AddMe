@@ -14,8 +14,19 @@ const geistMono = Geist_Mono({
 
 // plain JS, no types
 export const metadata = {
-  title: "QR Groups",
+  title: "AddMe QR Groups",
   description: "QR group management app",
+  manifest: '/manifest.json',
+  themeColor: '#2563eb',
+  appleWebApp: {
+    capable: true,
+    title: 'AddMe QR',
+    statusBarStyle: 'black-translucent',
+  },
+  icons: {
+    icon: '/icon-192.png',
+    apple: '/icon-192.png',
+  },
 };
 
 export default function RootLayout({ children }) {
